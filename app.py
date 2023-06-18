@@ -11,12 +11,15 @@ import pinecone
 import os
 from io import StringIO
 
+CHUNK_SIZE = 2000
+PINECONE_INDEX_NAME = 'ai-doc-qa'
+
 # App framework
-def init_streamlit(uploaded_doc, prompt):
+def init_streamlit():
     st.title('🦜️🔗 DOC QA GPT')
-    uploaded_doc = st.file_uploader("Upload doc to be read by AI", 
-        type=['pdf'])
-    prompt = st.text_input('Type your question here')
+    st.file_uploader("Upload doc to be read by AI", 
+        type=['pdf'], on_change=upload_and_index, key='current_doc')
+    st.session_state['prompt'] = st.text_input('Type your question here')
     hide_menu_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -30,41 +33,44 @@ def init_pinecone():
         environment=os.environ['PINECONE_API_ENV']
     )
 
+def upload_and_index():
+    with st.spinner('Wait for AI to process document'):
+        uploaded_doc = st.session_state['current_doc']
+        with open(os.path.join("data", uploaded_doc.name), "wb") as f:
+            f.write(uploaded_doc.getvalue())
+            file= "./data/" + uploaded_doc.name
+            st.write(file)
+        index_document(file)
+    st.success("AI Processed document, now ask questions")
+
 def index_document(doc):
-    index_name = 'ai-doc-qa'
     loader = UnstructuredPDFLoader(doc)
     data = loader.load()
 
-    # Split into smaller ∆documents
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=0)
+    # Split into smallest docs possible
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=0)
     texts = text_splitter.split_documents(data)
+
+    # If vector count is nearing free limits delete index and recreate it
+    if PINECONE_INDEX_NAME not in pinecone.list_indexes():        
+        pinecone.create_index(PINECONE_INDEX_NAME, dimension=1536, metric='cosine')
 
     # Create Embeddings
     embeddings = OpenAIEmbeddings(openai_api_key=os.environ['OPENAI_API_KEY'])  
-
-    return Pinecone.from_texts([t.page_content for t in texts], embeddings, index_name=index_name)
+    st.session_state['pinecone_index'] = Pinecone.from_texts([t.page_content for t in texts],
+                                                              embeddings, index_name=PINECONE_INDEX_NAME)
 
 def app():
-    uploaded_doc, prompt, docsearch, file = None, None, None, None
-    init_streamlit(uploaded_doc, prompt)
+    init_streamlit()
     init_pinecone()
+    
+    # Create llm and chain to answer questions from pinecone index
+    llm = OpenAI(temperature=0, openai_api_key=os.environ['OPENAI_API_KEY'])
+    chain = load_qa_chain(llm, chain_type="stuff")
 
-    if uploaded_doc is not None:
-        with open(os.path.join("data", uploaded_doc.name), "wb") as f:
-            f.write(uploaded_doc.getvalue())
-        file= "./data/" + uploaded_doc.name
-        st.write(file)
-        docsearch = index_document(file)
-        # Create llm and chain to answer questions from docsearch
-        llm = OpenAI(temperature=0, openai_api_key=os.environ['OPENAI_API_KEY'])
-        chain = load_qa_chain(llm, chain_type="stuff")
-        st.write("AI Processed document, now ask questions")
-    else:
-        st.write('Please upload document and ask questions')
-
-    if prompt:
-        query = prompt
-        docs = docsearch.similarity_search(query)
+    if st.session_state['prompt']:
+        query = st.session_state['prompt']
+        docs = st.session_state['pinecone_index'].similarity_search(query)
         response = chain.run(input_documents=docs, question=query)
         st.write('Answer:' + response)
 
