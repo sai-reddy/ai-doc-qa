@@ -16,7 +16,7 @@ PINECONE_INDEX_NAME = 'ai-doc-qa'
 
 # App framework
 def init_streamlit():
-    st.title('🦜️🔗 DOC QA GPT')
+    st.title('🦜️🔗 SAI DOC READER GPT')
     st.file_uploader("Upload doc to be read by AI", 
         type=['pdf'], on_change=upload_and_index, key='current_doc')
     st.session_state['prompt'] = st.text_input('Type your question here')
@@ -38,8 +38,7 @@ def upload_and_index():
         uploaded_doc = st.session_state['current_doc']
         with open(os.path.join("data", uploaded_doc.name), "wb") as f:
             f.write(uploaded_doc.getvalue())
-            file= "./data/" + uploaded_doc.name
-            st.write(file)
+            file= "./data/" + uploaded_doc.name            
         index_document(file)
     st.success("AI Processed document, now ask questions")
 
