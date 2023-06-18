@@ -68,5 +68,11 @@ def app():
         response = chain.run(input_documents=docs, question=query)
         st.write('Answer:' + response)
 
+def cleanup():
+    pass
+
 if __name__ == '__main__':    
-    app()
+    try:
+        app()
+    finally:
+        cleanup()
